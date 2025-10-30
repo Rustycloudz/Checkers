@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lucy's Checkers</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        // Defined board colors
+                        'board-dark': 'rgba(77, 0, 75, 0.68)',
+                        'board-light': 'rgba(230, 179, 228, 0.68)',
+                        // Piece and highlight colors (Colors already match a pink/purple theme)
+                        'piece-red': 'rgba(255, 0, 247, 0.68)',
+                        'piece-black': 'rgba(172, 57, 170, 0.86)',
+                        'highlight-select': 'rgba(255, 0, 120, 0.86)', // Green
+                        'highlight-move': 'rgba(92, 201, 95, 0.86)', // Blue
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        body {
+            font-family: 'URW Chancery L', cursive;;
+            /* Set the new background image */
+            background-image: url('https://cdn.pixabay.com/photo/2024/01/31/07/44/ai-generated-8543583_1280.png');
+            background-size: cover; /* Ensure the image covers the entire viewport */
+            background-position: center; /* Center the background image */
+            background-attachment: fixed; /* Keep background static on scroll */
+            
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        /* Enforce 8x8 grid structure */
+        #game-board {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            grid-template-rows: repeat(8, 1fr);
+            width: min(90vw, 600px); /* Responsive max width */
+            height: min(90vw, 600px); /* Keep it square */
+            box-shadow: 0 10px 25px rgba(255, 0, 120, 0.68);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .square {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            user-select: none;
+            cursor: pointer;
+        }
+
+        .piece {
+            width: 80%;
+            height: 80%;
+            border-radius: 50%;
+            box-shadow: 0 3px 6px rgba(255, 0, 247, 0.42);
+            transition: transform 0.1s;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 0.8em;
+            color: white;
+            font-weight: bold;
+        }
+
+        .piece.king::after {
+            content: '★';
+            position: absolute;
+            font-size: 1.5em;
+            line-height: 1;
+            text-shadow: 1px 1px 2px rgba(0, 140, 4, 0.68);
+        }
+
+        /* Mobile Adjustments for Piece Font Size */
+        @media (max-width: 640px) {
+            .piece.king::after {
+                font-size: 1.2em;
+            }
+        }
+
+        .selected .piece {
+            /* Now using Tailwind colors via standard CSS variable lookup */
+            outline: 3px solid var(--tw-colors-highlight-select);
+            outline-offset: 1px;
+            transform: scale(1.05);
+        }
+
+        .valid-target {
+            /* Now using Tailwind colors via standard CSS variable lookup */
+            background-color: var(--tw-colors-highlight-move) !important;
+            border: 3px solid purple;
+            box-shadow: inset 0 0 10px rgba(230, 179, 228, 0.68);
+        }
+
+        .valid-target::after {
+            content: '';
+            display: block;
+            width: 30%;
+            height: 30%;
+            border-radius: 50%;
+            background-color: rgba(0, 140, 4, 0.42);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="w-full max-w-xl mx-auto p-4 flex flex-col items-center">
+        <!-- Game Status and Controls -->
+        <div class="w-full mb-6 bg-pink-500 p-4 rounded-xl shadow-lg">
+            <h1 class="text-3xl font-bold text-center mb-2 text-purple-700">Lucy's Checkers</h1>
+            <div id="status-display" class="text-xl font-semibold text-center h-8 mb-4 text-purple-700">
+                <!-- Status text updated by JS -->
+            </div>
+            <button id="reset-button" class="w-full bg-purple-700 hover:bg-pink-500 text-pink-500 font-bold py-3 rounded-lg transition duration-150 shadow-md hover:shadow-xl">
+                Start New Game
+            </button>
+        </div>
+
+        <!-- The Game Board Container -->
+        <div id="game-board">
+            <!-- Board squares will be generated here by JavaScript -->
+        </div>
+
+        <!-- Modal for Game Over -->
+        <div id="game-over-modal" class="fixed inset-0 bg-purple bg-opacity-00 hidden items-center justify-center p-4 z-50" style="backdrop-filter: blur(5px);">
+            <div class="bg-pink-500 p-8 rounded-xl text-center shadow-2xl transform transition-transform duration-300 scale-100">
+                <h2 id="modal-message" class="text-3xl font-bold text-white mb-4"></h2>
+                <p class="text-pink-500 mb-6">Game Over!</p>
+                <button onclick="document.getElementById('game-over-modal').classList.add('hidden'); resetGame();" class="bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-6 rounded-lg transition duration-150">
+                    Play Again
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // --- CONSTANTS ---
+        const EMPTY = 0;
+        const RED_PIECE = 1; // Corresponds to Pink pieces in display
+        const BLACK_PIECE = 2; // Corresponds to Purple pieces in display
+        const RED_KING = 3;
+        const BLACK_KING = 4;
+
+        // --- GAME STATE ---
+        let boardState = [];
+        let currentPlayer = RED_PIECE; // Red/Pink starts at the bottom
+        let selectedPiece = null; // { row: r, col: c } of the currently selected piece
+        let validMoves = []; // Array of { row, col } for the selected piece
+        let mandatoryJumps = []; // Array of valid jump moves for the current player
+        let isMidJump = false; // Flag for multi-jump sequence
+
+        // --- DOM ELEMENTS ---
+        const boardElement = document.getElementById('game-board');
+        const statusDisplay = document.getElementById('status-display');
+        const modal = document.getElementById('game-over-modal');
+        const modalMessage = document.getElementById('modal-message');
+
+        // --- HELPER FUNCTIONS ---
+
+        /**
+         * Initializes the 8x8 board state for a new game.
+         */
+        function initializeBoard() {
+            boardState = [];
+            for (let r = 0; r < 8; r++) {
+                boardState[r] = new Array(8).fill(EMPTY);
+                for (let c = 0; c < 8; c++) {
+                    // Pieces only on dark squares (r + c is odd)
+                    if ((r + c) % 2 !== 0) {
+                        if (r < 3) {
+                            boardState[r][c] = BLACK_PIECE;
+                        } else if (r > 4) {
+                            boardState[r][c] = RED_PIECE;
+                        }
+                    }
+                }
+            }
+            currentPlayer = RED_PIECE;
+            selectedPiece = null;
+            validMoves = [];
+            mandatoryJumps = [];
+            isMidJump = false;
+        }
+
+        /**
+         * Checks if a position is valid and within the 8x8 board.
+         * @param {number} r Row index.
+         * @param {number} c Column index.
+         * @returns {boolean} True if coordinates are valid.
+         */
+        function isValidPosition(r, c) {
+            return r >= 0 && r < 8 && c >= 0 && c < 8;
+        }
+
+        /**
+         * Checks if the piece type belongs to the current player.
+         * @param {number} pieceType The piece value (1, 2, 3, or 4).
+         * @returns {boolean} True if the piece belongs to the current player.
+         */
+        function isCurrentPlayerPiece(pieceType) {
+            if (currentPlayer === RED_PIECE) {
+                return pieceType === RED_PIECE || pieceType === RED_KING;
+            } else {
+                return pieceType === BLACK_PIECE || pieceType === BLACK_KING;
+            }
+        }
+
+        /**
+         * Gets the piece color string for Tailwind styling.
+         * @param {number} pieceType The piece value.
+         * @returns {string} Tailwind class for piece color.
+         */
+        function getPieceColorClass(pieceType) {
+            if (pieceType === RED_PIECE || pieceType === RED_KING) {
+                return 'bg-piece-red';
+            } else if (pieceType === BLACK_PIECE || pieceType === BLACK_KING) {
+                return 'bg-piece-black';
+            }
+            return '';
+        }
+
+        /**
+         * Gets the full list of potential moves (jumps and simple steps) for a piece.
+         * @param {number} r Row of the piece.
+         * @param {number} c Column of the piece.
+         * @returns {Array<object>} Array of potential moves.
+         */
+        function getAllPossibleMoves(r, c) {
+            const pieceType = boardState[r][c];
+            const moves = [];
+
+            // Define possible directions for steps and jumps based on piece type
+            const directions = [];
+
+            if (pieceType === RED_PIECE) {
+                // Red/Pink moves up (rows decrease)
+                directions.push([-1, -1], [-1, 1]);
+            } else if (pieceType === BLACK_PIECE) {
+                // Black/Purple moves down (rows increase)
+                directions.push([1, -1], [1, 1]);
+            } else if (pieceType === RED_KING || pieceType === BLACK_KING) {
+                // Kings move both ways
+                directions.push([-1, -1], [-1, 1], [1, -1], [1, 1]);
+            }
+
+            for (const [dr, dc] of directions) {
+                const tr = r + dr; // Target row for a simple step
+                const tc = c + dc; // Target col for a simple step
+                const jumpR = r + 2 * dr; // Target row for a jump
+                const jumpC = c + 2 * dc; // Target col for a jump
+
+                // 1. Check for simple step (only if not mid-jump and no mandatory jumps exist)
+                if (!isMidJump) {
+                    if (isValidPosition(tr, tc) && boardState[tr][tc] === EMPTY) {
+                        moves.push({ r: tr, c: tc, isJump: false });
+                    }
+                }
+
+                // 2. Check for jump (always)
+                if (isValidPosition(jumpR, jumpC) && boardState[jumpR][jumpC] === EMPTY) {
+                    const jumpedPiece = boardState[tr][tc];
+                    if (jumpedPiece !== EMPTY && !isCurrentPlayerPiece(jumpedPiece)) {
+                        // Found a valid jump over an opponent's piece
+                        moves.push({ r: jumpR, c: jumpC, isJump: true, jumpedR: tr, jumpedC: tc });
+                    }
+                }
+            }
+
+            return moves;
+        }
+
+        /**
+         * Determines the actual valid moves for the selected piece based on game rules (mandatory jumps).
+         * @param {number} r Row of the piece.
+         * @param {number} c Column of the piece.
+         * @returns {Array<object>} Array of valid move targets {r, c, isJump}.
+         */
+        function getValidMoves(r, c) {
+            const moves = getAllPossibleMoves(r, c);
+
+            if (mandatoryJumps.length > 0) {
+                // If jumps are mandatory, only return jump moves
+                return moves.filter(move => move.isJump);
+            }
+            // Otherwise, return all possible moves
+            return moves;
+        }
+
+        /**
+         * Scans the whole board for any mandatory jumps for the current player.
+         */
+        function checkForMandatoryJumps() {
+            mandatoryJumps = [];
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    const piece = boardState[r][c];
+                    if (isCurrentPlayerPiece(piece)) {
+                        const moves = getAllPossibleMoves(r, c);
+                        const jumps = moves.filter(move => move.isJump);
+                        if (jumps.length > 0) {
+                            mandatoryJumps.push({ r, c, jumps });
+                        }
+                    }
+                }
+            }
+        }
+
+        /**
+         * Switches the turn to the other player.
+         */
+        function switchTurn() {
+            currentPlayer = currentPlayer === RED_PIECE ? BLACK_PIECE : RED_PIECE;
+            selectedPiece = null;
+            validMoves = [];
+            isMidJump = false;
+            checkForMandatoryJumps();
+            drawBoard();
+            updateStatus();
+            checkWinCondition();
+        }
+
+        /**
+         * Checks if the game has ended and displays the modal if so.
+         */
+        function checkWinCondition() {
+            let redPieces = 0;
+            let blackPieces = 0;
+
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    const piece = boardState[r][c];
+                    if (piece === RED_PIECE || piece === RED_KING) {
+                        redPieces++;
+                    } else if (piece === BLACK_PIECE || piece === BLACK_KING) {
+                        blackPieces++;
+                    }
+                }
+            }
+
+            // Update winning messages to use 'Pink' and 'Purple'
+            if (redPieces === 0) {
+                endGame('Purple Wins!');
+            } else if (blackPieces === 0) {
+                endGame('Pink Wins!');
+            } else if (!canMove(RED_PIECE) && currentPlayer === RED_PIECE) {
+                endGame('Purple Wins! (Pink cannot move)');
+            } else if (!canMove(BLACK_PIECE) && currentPlayer === BLACK_PIECE) {
+                endGame('Pink Wins! (Purple cannot move)');
+            }
+        }
+
+        /**
+         * Checks if the given player has any available moves.
+         */
+        function canMove(playerType) {
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    const piece = boardState[r][c];
+                    if (piece === playerType || piece === playerType + 2) { // Check for regular or King
+                        const moves = getAllPossibleMoves(r, c);
+                        if (moves.length > 0) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        /**
+         * Displays the game over modal with the winner message.
+         * @param {string} message The winning message.
+         */
+        function endGame(message) {
+            modalMessage.textContent = message;
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        /**
+         * Updates the status display text.
+         */
+        function updateStatus() {
+            // Change 'Red' pieces to 'Pink' and 'Black' pieces to 'Purple' in display
+            const playerColor = currentPlayer === RED_PIECE ? 'Pink' : 'Purple';
+            const statusText = `${playerColor}'s Turn. ${mandatoryJumps.length > 0 ? ' (JUMP MANDATORY)' : ''}`;
+            statusDisplay.textContent = statusText;
+            // Adjust the status text color to match the new theme
+            statusDisplay.className = `text-xl font-semibold text-center h-8 mb-4 ${currentPlayer === RED_PIECE ? 'text-pink-400' : 'text-purple-200'}`;
+        }
+
+        /**
+         * Handles the click on any square of the board.
+         * @param {number} r Row index.
+         * @param {number} c Column index.
+         */
+        function handleClick(r, c) {
+            const pieceType = boardState[r][c];
+
+            // 1. Try to select a piece
+            if (isCurrentPlayerPiece(pieceType)) {
+                // If it's a new piece or re-selecting the same piece
+                if (!isMidJump) {
+                    // Check if selection is restricted due to mandatory jumps
+                    const isMandatory = mandatoryJumps.some(j => j.r === r && j.c === c);
+
+                    if (mandatoryJumps.length === 0 || isMandatory) {
+                        selectedPiece = { r, c };
+                        validMoves = getValidMoves(r, c);
+                        drawBoard(); // Redraw to show selection and valid moves
+                    } else {
+                        // Notify that a jump is available elsewhere
+                        showTemporaryMessage("You must jump! Select a piece that can capture.");
+                    }
+                } else if (selectedPiece && selectedPiece.r === r && selectedPiece.c === c) {
+                    // Deselect the piece during a multi-jump is disallowed
+                    showTemporaryMessage("You must continue jumping or end the turn.");
+                } else {
+                    // Cannot select a different piece mid-jump
+                    showTemporaryMessage("You must complete the current jump sequence.");
+                }
+                return;
+            }
+
+            // 2. Try to make a move (if a piece is selected)
+            if (selectedPiece && pieceType === EMPTY) {
+                const targetMove = validMoves.find(m => m.r === r && m.c === c);
+
+                if (targetMove) {
+                    makeMove(selectedPiece.r, selectedPiece.c, r, c, targetMove.isJump, targetMove.jumpedR, targetMove.jumpedC);
+                } else {
+                    // Invalid move
+                    showTemporaryMessage("Invalid move for the selected piece.");
+                }
+                return;
+            }
+
+            // 3. Deselect if clicking an empty, non-target square
+            if (selectedPiece && pieceType === EMPTY && !isMidJump) {
+                selectedPiece = null;
+                validMoves = [];
+                drawBoard();
+            }
+        }
+
+        /**
+         * Executes the piece movement and updates the board state.
+         */
+        function makeMove(fromR, fromC, toR, toC, isJump, jumpedR, jumpedC) {
+            // Move the piece
+            const piece = boardState[fromR][fromC];
+            boardState[toR][toC] = piece;
+            boardState[fromR][fromC] = EMPTY;
+
+            // Handle Capture (Jump)
+            if (isJump) {
+                boardState[jumpedR][jumpedC] = EMPTY;
+
+                // Check for multi-jump opportunity
+                selectedPiece = { r: toR, c: toC };
+                const nextMoves = getAllPossibleMoves(toR, toC);
+                const nextJumps = nextMoves.filter(m => m.isJump);
+
+                if (nextJumps.length > 0) {
+                    // Mandatory multi-jump: stay on this piece
+                    isMidJump = true;
+                    validMoves = nextJumps;
+                    drawBoard();
+                    return; // Don't switch turn yet
+                }
+            }
+
+            // Handle Crowning
+            if (piece === RED_PIECE && toR === 0) {
+                boardState[toR][toC] = RED_KING;
+            } else if (piece === BLACK_PIECE && toR === 7) {
+                boardState[toR][toC] = BLACK_KING;
+            }
+
+            // End turn
+            switchTurn();
+        }
+
+        /**
+         * Renders the current board state to the DOM.
+         */
+        function drawBoard() {
+            boardElement.innerHTML = ''; // Clear previous board
+
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    const square = document.createElement('div');
+                    square.classList.add('square');
+                    square.setAttribute('data-row', r);
+                    square.setAttribute('data-col', c);
+                    square.addEventListener('click', () => handleClick(r, c));
+
+                    const isDark = (r + c) % 2 !== 0;
+                    
+                    // --- Use Tailwind classes directly ---
+                    square.classList.add(isDark ? 'bg-board-dark' : 'bg-board-light');
+                    // ------------------------------------
+
+                    // Highlight selected piece
+                    if (selectedPiece && selectedPiece.r === r && selectedPiece.c === c) {
+                        square.classList.add('selected');
+                    }
+
+                    // Highlight valid moves
+                    const isTarget = validMoves.some(move => move.r === r && move.c === c);
+                    if (isTarget) {
+                        square.classList.add('valid-target');
+                    }
+
+                    // Draw piece if present
+                    const pieceType = boardState[r][c];
+                    if (pieceType !== EMPTY) {
+                        const pieceElement = document.createElement('div');
+                        pieceElement.classList.add('piece', getPieceColorClass(pieceType), 'shadow-lg');
+                        if (pieceType === RED_KING || pieceType === BLACK_KING) {
+                            pieceElement.classList.add('king');
+                        }
+                        square.appendChild(pieceElement);
+
+                        // Highlight piece if it must jump
+                        if (!selectedPiece && mandatoryJumps.some(j => j.r === r && j.c === c)) {
+                            pieceElement.style.boxShadow = '0 0 0 3px #008C04'; // Yellow glow for mandatory jumps
+                        }
+                    }
+
+                    boardElement.appendChild(square);
+                }
+            }
+        }
+
+        /**
+         * Displays a temporary message in the status bar instead of using alert.
+         */
+        function showTemporaryMessage(message) {
+            const originalText = statusDisplay.textContent;
+            statusDisplay.textContent = message;
+            statusDisplay.classList.add('text-red-500');
+            setTimeout(() => {
+                updateStatus(); // Revert to current player status
+            }, 1500);
+        }
+
+        // --- GAME CONTROL ---
+
+        /**
+         * Starts or resets the game.
+         */
+        function resetGame() {
+            initializeBoard();
+            checkForMandatoryJumps();
+            drawBoard();
+            updateStatus();
+        }
+
+        // --- INITIALIZATION ---
+        window.onload = function() {
+            resetGame();
+
+            document.getElementById('reset-button').addEventListener('click', () => {
+                // Confirm action with a custom message box instead of alert/confirm
+                if(isMidJump) {
+                    showTemporaryMessage("Finish your jump first or click 'Play Again' in the Game Over screen.");
+                } else {
+                    const confirmReset = window.confirm("Are you sure you want to reset the game?");
+                    if (confirmReset) {
+                        resetGame();
+                    }
+                }
+            });
+
+            // Polyfill for simple custom confirm (since window.confirm is restricted)
+            window.confirm = (message) => {
+                const result = window.prompt(message + " (Type 'yes' to confirm)");
+                return result && result.toLowerCase() === 'yes';
+            };
+        };
+
+    </script>
+</body>
+</html>
